@@ -389,6 +389,42 @@ inject_runtime_hooks() {
             fi
         done
 
+        # ── hex-patch ALL ELF binaries in the rootfs ─────────────
+        # The bootstrap is built from source with the custom name in
+        # build scripts, but compiled binaries may still have
+        # com.termux hardcoded in RUNPATH and rodata (the C compiler
+        # bakes paths from LDFLAGS). This step does a same-length
+        # (22==22 byte) in-place substitution on every ELF file.
+        echo "  patching ELF binaries (com.termux → $NEW_PKG)..."
+        local patched_count=0
+        for scan_dir in "$ROOTFS_DIR/bin" "$ROOTFS_DIR/lib" "$ROOTFS_DIR/libexec"; do
+            [ -d "$scan_dir" ] || continue
+            find "$scan_dir" -type f 2>/dev/null | while IFS= read -r f; do
+                if LC_ALL=C grep -q -a '/data/data/com\.termux/' "$f" 2>/dev/null; then
+                    LC_ALL=C sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$f" 2>/dev/null && \
+                        patched_count=$((patched_count + 1))
+                fi
+            done
+        done
+        echo "  ✓ ELF binaries patched"
+
+        # ── rewrite dpkg metadata ────────────────────────────────
+        # dpkg info files (postinst, prerm, conffiles, list, etc.)
+        # and the status DB may still reference com.termux paths.
+        local INFO="$ROOTFS_DIR/var/lib/dpkg/info"
+        local STATUS="$ROOTFS_DIR/var/lib/dpkg/status"
+        if [ -d "$INFO" ]; then
+            echo "  patching dpkg metadata..."
+            for ext in preinst postinst prerm postrm conffiles md5sums list triggers templates; do
+                find "$INFO" -maxdepth 1 -name "*.${ext}" -print0 2>/dev/null \
+                    | xargs -0 -r sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' 2>/dev/null || true
+            done
+            if [ -f "$STATUS" ]; then
+                sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$STATUS" 2>/dev/null || true
+            fi
+            echo "  ✓ dpkg metadata patched"
+        fi
+
         # ── rewrite SYMLINKS.txt if present (zip format) ─────────
         if [ -f "$ROOTFS_DIR/SYMLINKS.txt" ]; then
             sed -i "s|/data/data/com.termux/|/data/data/$NEW_PKG/|g" \

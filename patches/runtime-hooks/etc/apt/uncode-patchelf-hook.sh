@@ -66,8 +66,9 @@ for dir in "$PREFIX/bin" "$PREFIX/lib" "$PREFIX/libexec"; do
         done
     else
         find "$dir" -type f -cmin -10 2>/dev/null | while IFS= read -r f; do
-            # Skip non-ELF files
-            head -c4 "$f" 2>/dev/null | grep -q "$(printf '\x7fELF')" || continue
+            # Skip non-ELF files (check for \x7fELF magic)
+            case "$(head -c4 "$f" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' ')" in
+                7f454c46) ;; *) continue ;; esac
             maybe_hex_patch "$f"
             maybe_patchelf "$f"
         done
