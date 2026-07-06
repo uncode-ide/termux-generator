@@ -1,0 +1,6 @@
+# patchelf is load-bearing for the 98-uncode-patchelf Post-Invoke
+# hook — without it, freshly-installed ELFs have wrong RUNPATH and
+# fail at dlopen. apt autoremove can drop it mid-session. Pin keeps it.
+Package: patchelf
+Pin: release *
+Pin-Priority: 100

@@ -1,0 +1,5 @@
+# Default mirror. Hardcoded to prevent pkg's auto-probe from
+# picking bot-protected CDN mirrors that return HTTP 200 on
+# the bot-check page but serve HTML instead of PGP-clearsigned
+# InRelease, causing "Clearsigned file isn't valid, got 'NOSPLIT'".
+deb https://packages-cf.termux.dev/apt/termux-main stable main

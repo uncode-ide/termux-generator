@@ -1,0 +1,103 @@
+--- a/termux-app/build.gradle.kts
++++ b/termux-app/build.gradle.kts
+@@ -79,12 +69,6 @@ android {
+         targetCompatibility = JavaVersion.VERSION_11
+     }
+ 
+-    externalNativeBuild {
+-        ndkBuild {
+-            path = File("src/main/cpp/Android.mk")
+-        }
+-    }
+-
+     testOptions {
+         unitTests {
+             isIncludeAndroidResources = true
+@@ -177,13 +171,12 @@ tasks.register("downloadPrebuilt") {
+         arches.forEach { (arch, checksum) ->
+             val downloadTo = "src/main/cpp/bootstrap-${arch}.zip"
+             val url = "https://github.com/termux-play-store/termux-packages/releases/download/bootstrap-${bootstrapVersion}/bootstrap-${arch}.zip"
+-            downloadFile(projectDir, downloadTo, url, checksum)
+         }
+ 
+         val prootTag = "proot-2026.06.21-r1"
+         val prootVersion = "5.1.107.80-0"
+         var prootUrl = "https://github.com/termux-play-store/termux-packages/releases/download/${prootTag}/libproot-loader-ARCH-${prootVersion}.so"
+-        downloadFile(projectDir, "src/main/jniLibs/armeabi-v7a/libproot-loader.so", prootUrl.replace("ARCH", "arm"), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
++        downloadFile(projectDir, "src/main/jniLibs/armeabi-v7a/libproot-loader.so", prootUrl.replace("ARCH", "arm"), "09729047155df0c1a6b55c265ff4e272107775961d7efaff06bdd7cf37904050")
+         downloadFile(projectDir, "src/main/jniLibs/arm64-v8a/libproot-loader.so", prootUrl.replace("ARCH", "aarch64"), "f7e3211e4c210c2a39a1f22b7f38666d99aee172fd009c0d19b84108cf20bb42")
+         downloadFile(projectDir, "src/main/jniLibs/x86_64/libproot-loader.so", prootUrl.replace("ARCH", "x86_64"), "86e22d456255417e1d4ee874986571578ff26675ae2e372458e0d87f26454c63")
+     }
++++ a/termux-app/src/main/java/com/termux/app/TermuxInstaller.java
++++ b/termux-app/src/main/java/com/termux/app/TermuxInstaller.java
+@@ -6,6 +6,8 @@ import android.app.ProgressDialog;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.pm.ApplicationInfo;
++import android.content.res.AssetManager;
++import android.os.Build;
+ import android.os.Environment;
+ import android.os.UserHandle;
+ import android.os.UserManager;
+@@ -23,9 +25,12 @@ import java.io.ByteArrayInputStream;
+ import java.io.File;
+ import java.io.FileOutputStream;
+ import java.io.IOException;
++import java.io.InputStream;
+ import java.io.InputStreamReader;
++import java.io.OutputStream;
+ import java.nio.file.Files;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.List;
+ import java.util.zip.ZipEntry;
+ import java.util.zip.ZipInputStream;
+@@ -102,9 +107,11 @@ final class TermuxInstaller {
+ 
+                 final byte[] buffer = new byte[8096];
+                 final List<Pair<String, String>> symlinks = new ArrayList<>(50);
++                AssetManager assetManager = activity.getApplicationContext().getAssets();
++                String bootstrapFilename = "bootstrap-" + determineTermuxArchName() + ".zip";
++                InputStream inputStream = assetManager.open(bootstrapFilename);
+ 
+-                final byte[] zipBytes = loadZipBytes();
+-                try (ZipInputStream zipInput = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
++                try (ZipInputStream zipInput = new ZipInputStream(inputStream)) {
+                     ZipEntry zipEntry;
+                     while ((zipEntry = zipInput.getNextEntry()) != null) {
+                         if (zipEntry.getName().equals("SYMLINKS.txt")) {
+@@ -303,14 +310,28 @@ final class TermuxInstaller {
+         return dir.delete();
+     }
+ 
+-    public static byte[] loadZipBytes() {
+-        // Only load the shared library when necessary to save memory usage.
+-        System.loadLibrary("termux-bootstrap");
+-        return getZip();
++    // Made by Nix-on-droid
++    // https://github.com/nix-community/nix-on-droid-app/blob/e87b6091bffa7b6eafb1b59cc7824f5692441cd0/app/src/main/java/com/termux/app/TermuxInstaller.java#L432
++    private static String determineTermuxArchName() {
++        // Note that we cannot use System.getProperty("os.arch") since that may give e.g. "aarch64"
++        // while a 64-bit runtime may not be installed (like on the Samsung Galaxy S5 Neo).
++        // Instead we search through the supported abi:s on the device, see:
++        // http://developer.android.com/ndk/guides/abis.html
++        // Note that we search for abi:s in preferred order (the ordering of the
++        // Build.SUPPORTED_ABIS list) to avoid e.g. installing arm on an x86 system where arm
++        // emulation is available.
++        for (String androidArch : Build.SUPPORTED_ABIS) {
++            switch (androidArch) {
++                case "arm64-v8a": return "aarch64";
++                case "armeabi-v7a": return "arm";
++                case "x86_64": return "x86_64";
++                case "x86": return "i686";
++            }
++        }
++        throw new RuntimeException("Unable to determine arch from Build.SUPPORTED_ABIS =  " +
++            Arrays.toString(Build.SUPPORTED_ABIS));
+     }
+ 
+-    public static native byte[] getZip();
+-
+     public static void setupAppLibSymlink(Context context) {
+         var nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
+         var targetFile = new File(TermuxConstants.APP_LIB_PATH);

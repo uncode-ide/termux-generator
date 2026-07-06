@@ -1,0 +1,6 @@
+// Post-Invoke hook: rewrites com.termux references in EVERY dpkg
+// metadata file type plus the master status DB after every dpkg
+// --unpack so --configure runs against clean state.
+DPkg::Post-Invoke {
+    "sed -i 's|/data/data/com\\.termux/|/data/data/@NEW_PKG@/|g' @PREFIX@/var/lib/dpkg/info/*.preinst @PREFIX@/var/lib/dpkg/info/*.postinst @PREFIX@/var/lib/dpkg/info/*.prerm @PREFIX@/var/lib/dpkg/info/*.postrm @PREFIX@/var/lib/dpkg/info/*.conffiles @PREFIX@/var/lib/dpkg/info/*.md5sums @PREFIX@/var/lib/dpkg/info/*.list @PREFIX@/var/lib/dpkg/info/*.triggers @PREFIX@/var/lib/dpkg/info/*.templates @PREFIX@/var/lib/dpkg/status 2>/dev/null || true";
+};
