@@ -390,19 +390,52 @@ inject_runtime_hooks() {
         done
 
         # ── hex-patch ALL ELF binaries in the rootfs ─────────────
-        # The bootstrap is built from source with the custom name in
-        # build scripts, but compiled binaries may still have
-        # com.termux hardcoded in RUNPATH and rodata (the C compiler
-        # bakes paths from LDFLAGS). This step does a same-length
-        # (22==22 byte) in-place substitution on every ELF file.
+        # Uses perl for binary-safe same-length (22==22) patching.
+        # sed is NOT safe for ELF binary files: NUL bytes cause
+        # undefined behaviour and corrupt the file.
+        # Text files (shebangs, scripts) use sed — that's safe.
         echo "  patching ELF binaries (com.termux → $NEW_PKG)..."
-        local patched_count=0
-        for scan_dir in "$ROOTFS_DIR/bin" "$ROOTFS_DIR/lib" "$ROOTFS_DIR/libexec"; do
+        local pcount=0
+        for scan_dir in "$ROOTFS_DIR/bin" "$ROOTFS_DIR/sbin" \
+                        "$ROOTFS_DIR/lib" "$ROOTFS_DIR/libexec" \
+                        "$ROOTFS_DIR/glibc/bin" "$ROOTFS_DIR/glibc/lib"; do
             [ -d "$scan_dir" ] || continue
             find "$scan_dir" -type f 2>/dev/null | while IFS= read -r f; do
-                if LC_ALL=C grep -q -a '/data/data/com\.termux/' "$f" 2>/dev/null; then
-                    LC_ALL=C sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$f" 2>/dev/null && \
-                        patched_count=$((patched_count + 1))
+                # Skip critical files that patchelf/sed must never touch
+                case "${f##*/}" in
+                    ld-musl-aarch64.so.1|libc.musl-aarch64.so.1|libc++_shared.so)
+                        continue ;;
+                esac
+                # First check: does this file have the old path at all?
+                LC_ALL=C grep -q -a '/data/data/com\.termux/' "$f" 2>/dev/null || continue
+                # For ELF binaries: use perl for NUL-safe in-place patch
+                # For text files: sed is fine (no NUL bytes)
+                if [ -x "$ROOTFS_DIR/bin/perl" ]; then
+                    "$ROOTFS_DIR/bin/perl" -e '
+                        my $path = $ARGV[0];
+                        open my $fh, "+<:raw", $path or exit 1;
+                        my $data = do { local $/; <$fh> };
+                        my $n = 0;
+                        while ($data =~ m{/data/data/com\.termux/}g) {
+                            seek $fh, $-[0], 0;
+                            print $fh "/data/data/'"$NEW_PKG"'/";
+                            $n++;
+                        }
+                        close $fh;
+                        exit 0;
+                    ' "$f" 2>/dev/null && pcount=$((pcount + 1))
+                else
+                    # perl not available at build time: use sed only on
+                    # text files (skip ELF magic). This is safe for
+                    # shebangs/scripts inside the rootfs.
+                    case "$(head -c4 "$f" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' ')" in
+                        7f454c46)
+                            # ELF binary — skip without perl (sed would corrupt)
+                            echo "  WARNING: skipping ELF binary $f (perl not available)" ;;
+                        *)
+                            LC_ALL=C sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$f" 2>/dev/null \
+                                && pcount=$((pcount + 1)) ;;
+                    esac
                 fi
             done
         done
@@ -411,16 +444,25 @@ inject_runtime_hooks() {
         # ── rewrite dpkg metadata ────────────────────────────────
         # dpkg info files (postinst, prerm, conffiles, list, etc.)
         # and the status DB may still reference com.termux paths.
+        # Use perl -i -pe: more portable than sed -i (BSD sed needs
+        # -i '' while GNU sed takes bare -i; perl works on both).
         local INFO="$ROOTFS_DIR/var/lib/dpkg/info"
         local STATUS="$ROOTFS_DIR/var/lib/dpkg/status"
         if [ -d "$INFO" ]; then
             echo "  patching dpkg metadata..."
+            local PATCH_CMD
+            if [ -x "$ROOTFS_DIR/bin/perl" ]; then
+                PATCH_CMD="$ROOTFS_DIR/bin/perl -i -pe"
+            else
+                PATCH_CMD="sed -i"
+            fi
             for ext in preinst postinst prerm postrm conffiles md5sums list triggers templates; do
                 find "$INFO" -maxdepth 1 -name "*.${ext}" -print0 2>/dev/null \
-                    | xargs -0 -r sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' 2>/dev/null || true
+                    | xargs -0 -r $PATCH_CMD \
+                        "s|/data/data/com\.termux/|/data/data/${NEW_PKG}/|g" 2>/dev/null || true
             done
             if [ -f "$STATUS" ]; then
-                sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$STATUS" 2>/dev/null || true
+                $PATCH_CMD "s|/data/data/com\.termux/|/data/data/${NEW_PKG}/|g" "$STATUS" 2>/dev/null || true
             fi
             echo "  ✓ dpkg metadata patched"
         fi
