@@ -1,5 +1,5 @@
 // Pre-Install-Pkgs hook: rewrites com.termux shebangs and directory
 // structure in incoming .deb packages before dpkg --unpack runs them.
 DPkg::Pre-Install-Pkgs {
-    "@PREFIX@/etc/apt/uncode-pre-install-rewrite.sh";
+    "sh @PREFIX@/etc/apt/uncode-pre-install-rewrite.sh";
 };

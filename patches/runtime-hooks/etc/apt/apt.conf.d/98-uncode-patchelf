@@ -1,5 +1,5 @@
 // Post-Invoke hook: patches ELF binaries' DT_RUNPATH and hex-patches
 // rodata string constants after each dpkg --unpack.
 DPkg::Post-Invoke {
-    "@PREFIX@/etc/apt/uncode-patchelf-hook.sh || true";
+    "sh @PREFIX@/etc/apt/uncode-patchelf-hook.sh || true";
 };
