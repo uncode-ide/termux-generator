@@ -467,6 +467,27 @@ inject_runtime_hooks() {
             echo "  ✓ dpkg metadata patched"
         fi
 
+        # ── patch node platform if nodejs package is pre-bundled ──
+        # Overwrite \x00android\x00 with linux\x00\x00 inside the node binary
+        # so npm/native modules see process.platform === 'linux'.
+        if [ -f "$ROOTFS_DIR/bin/node" ]; then
+            echo "  patching NODE_PLATFORM inside node binary..."
+            perl -e '
+                my $path = $ARGV[0];
+                open my $fh, "+<:raw", $path or exit 1;
+                my $data = do { local $/; <$fh> };
+                if ($data =~ /\x00android\x00/) {
+                    my $offset = $-[0] + 1;
+                    seek $fh, $offset, 0;
+                    print $fh "linux\x00\x00";
+                    close $fh;
+                    print "  ✓ patched NODE_PLATFORM at offset $offset\n";
+                } else {
+                    print "  (already patched or no match found)\n";
+                }
+            ' "$ROOTFS_DIR/bin/node" 2>/dev/null || echo "  WARNING: failed to patch node binary"
+        fi
+
         # ── rewrite SYMLINKS.txt if present (zip format) ─────────
         if [ -f "$ROOTFS_DIR/SYMLINKS.txt" ]; then
             sed -i "s|/data/data/com.termux/|/data/data/$NEW_PKG/|g" \

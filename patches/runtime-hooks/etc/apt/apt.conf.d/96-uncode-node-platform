@@ -1,0 +1,5 @@
+// Post-Invoke hook: rewrites the NODE_PLATFORM literal in @PREFIX@/bin/node
+// after every dpkg invocation to process.platform === 'linux'.
+DPkg::Post-Invoke {
+    "sh @PREFIX@/etc/apt/uncode-node-platform-hook.sh || true";
+};
