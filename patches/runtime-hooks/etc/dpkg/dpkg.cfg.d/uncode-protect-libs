@@ -1,0 +1,4 @@
+# Refuses to extract libc++_shared.so from any package — we ship our own
+# compiled for the custom prefix, and the official Termux repo's version
+# is linked to com.termux, which would overwrite ours and brick apt/dpkg.
+path-exclude=@PREFIX@/lib/libc++_shared.so
