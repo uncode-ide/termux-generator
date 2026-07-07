@@ -10,11 +10,12 @@ fi
 if [ -z "$TERMUX__ROOTFS" ]; then
     export TERMUX__ROOTFS="@ROOTFS@"
 fi
-# Override HOME if it's empty or any Android-flavored app data dir,
-# but leave a custom-set HOME alone.
+# Override HOME only if it is empty or does not point to the termux home directory layout.
+# This prevents overriding /data/user/0/com.uncode/files/home to /data/data/com.uncode/files/home
+# (or vice versa), which causes prompt layout issues (e.g. showing absolute path instead of '~').
 case "$HOME" in
-    "$TERMUX__ROOTFS/home"|"$TERMUX__ROOTFS/home/"*) ;;  # already correct
-    ""|/data/user/0/*|/data/data/*) export HOME="$TERMUX__ROOTFS/home" ;;
+    *"/files/home"|*"/files/home/"*) ;;  # already correct (matches either data/data or data/user/0 prefix)
+    *) export HOME="$TERMUX__ROOTFS/home" ;;
 esac
 if [ -z "$TMPDIR" ]; then
     export TMPDIR="$PREFIX/tmp"
