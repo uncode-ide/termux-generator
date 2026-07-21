@@ -1,0 +1,4 @@
+# libc++_shared.so ships prebuilt for this device's data directory.
+# The copy in upstream packages is not, and would break the runtime
+# if it overwrote ours.
+path-exclude=@PREFIX@/lib/libc++_shared.so

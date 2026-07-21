@@ -1,0 +1,5 @@
+// Pre-Install-Pkgs hook: adapts incoming package payloads to this
+// device's data directory before dpkg unpacks them.
+DPkg::Pre-Install-Pkgs {
+    "sh @PREFIX@/libexec/fscompat/pre-unpack.sh";
+};

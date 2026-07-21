@@ -1,0 +1,5 @@
+// Post-Invoke hook: finishes adapting newly-unpacked files and
+// package metadata after each dpkg run.
+DPkg::Post-Invoke {
+    "sh @PREFIX@/libexec/fscompat/post-unpack.sh || true";
+};

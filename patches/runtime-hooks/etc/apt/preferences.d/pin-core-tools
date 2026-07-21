@@ -1,0 +1,11 @@
+# dpkg and patchelf in this bootstrap are built for this device's
+# data directory. Upstream builds of either from the main repo are
+# not, and replacing them would break package installs. Pinned to
+# forbid upgrades and autoremove.
+Package: dpkg
+Pin: release *
+Pin-Priority: 1001
+
+Package: patchelf
+Pin: release *
+Pin-Priority: 1001

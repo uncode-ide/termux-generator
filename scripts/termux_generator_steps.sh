@@ -394,6 +394,18 @@ inject_runtime_hooks() {
         # sed is NOT safe for ELF binary files: NUL bytes cause
         # undefined behaviour and corrupt the file.
         # Text files (shebangs, scripts) use sed — that's safe.
+        # In-place binary string substitution only works if the
+        # replacement is EXACTLY the same byte length — otherwise every
+        # following byte shifts and the ELF section/offset tables are
+        # corrupted. "com.termux" is 10 chars; if NEW_PKG's dotted name
+        # differs in length, skip hex-patching (patchelf's RUNPATH fix
+        # below still runs and covers the part that's actually load-bearing).
+        local HEXPATCH_SAFE=1
+        if [ "$(echo -n "/data/data/$NEW_PKG/" | wc -c)" -ne "$(echo -n "/data/data/com.termux/" | wc -c)" ]; then
+            HEXPATCH_SAFE=0
+            echo "  NOTE: '$NEW_PKG' is a different length than 'com.termux' — skipping binary string hex-patch (would corrupt ELF offsets). RUNPATH fix via patchelf still applies."
+        fi
+
         echo "  patching ELF binaries (com.termux → $NEW_PKG)..."
         local pcount=0
         for scan_dir in "$ROOTFS_DIR/bin" "$ROOTFS_DIR/sbin" \
@@ -408,34 +420,41 @@ inject_runtime_hooks() {
                 esac
                 # First check: does this file have the old path at all?
                 LC_ALL=C grep -q -a '/data/data/com\.termux/' "$f" 2>/dev/null || continue
-                # For ELF binaries: use perl for NUL-safe in-place patch
-                # For text files: sed is fine (no NUL bytes)
-                if [ -x "$ROOTFS_DIR/bin/perl" ]; then
-                    "$ROOTFS_DIR/bin/perl" -e '
-                        my $path = $ARGV[0];
-                        open my $fh, "+<:raw", $path or exit 1;
-                        my $data = do { local $/; <$fh> };
-                        my $n = 0;
-                        while ($data =~ m{/data/data/com\.termux/}g) {
-                            seek $fh, $-[0], 0;
-                            print $fh "/data/data/'"$NEW_PKG"'/";
-                            $n++;
-                        }
-                        close $fh;
-                        exit 0;
-                    ' "$f" 2>/dev/null && pcount=$((pcount + 1))
+
+                is_elf_file=0
+                case "$(head -c4 "$f" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' ')" in
+                    7f454c46) is_elf_file=1 ;;
+                esac
+
+                if [ "$is_elf_file" = 1 ]; then
+                    # Binary: only safe to touch in place if the new
+                    # package name is the same byte length, and only
+                    # with perl (sed is NUL-unsafe on binary data).
+                    if [ "$HEXPATCH_SAFE" = 1 ] && [ -x "$ROOTFS_DIR/bin/perl" ]; then
+                        "$ROOTFS_DIR/bin/perl" -e '
+                            my $path = $ARGV[0];
+                            open my $fh, "+<:raw", $path or exit 1;
+                            my $data = do { local $/; <$fh> };
+                            my $n = 0;
+                            while ($data =~ m{/data/data/com\.termux/}g) {
+                                seek $fh, $-[0], 0;
+                                print $fh "/data/data/'"$NEW_PKG"'/";
+                                $n++;
+                            }
+                            close $fh;
+                            exit 0;
+                        ' "$f" 2>/dev/null && pcount=$((pcount + 1))
+                    elif [ "$HEXPATCH_SAFE" = 0 ]; then
+                        : # length mismatch — intentionally skipped, already warned once above
+                    else
+                        echo "  WARNING: skipping ELF binary $f (perl not available)"
+                    fi
                 else
-                    # perl not available at build time: use sed only on
-                    # text files (skip ELF magic). This is safe for
-                    # shebangs/scripts inside the rootfs.
-                    case "$(head -c4 "$f" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' ')" in
-                        7f454c46)
-                            # ELF binary — skip without perl (sed would corrupt)
-                            echo "  WARNING: skipping ELF binary $f (perl not available)" ;;
-                        *)
-                            LC_ALL=C sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$f" 2>/dev/null \
-                                && pcount=$((pcount + 1)) ;;
-                    esac
+                    # Text file: sed is always safe here regardless of
+                    # length, since this is normal line-based text
+                    # substitution, not a fixed-offset binary patch.
+                    LC_ALL=C sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$f" 2>/dev/null \
+                        && pcount=$((pcount + 1))
                 fi
             done
         done
