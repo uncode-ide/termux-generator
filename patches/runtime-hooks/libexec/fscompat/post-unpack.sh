@@ -42,14 +42,29 @@ rm -f "$TARGET_LIST"
 INFO="$PREFIX/var/lib/dpkg/info"
 STATUS="$PREFIX/var/lib/dpkg/status"
 MARKER="$STATE_DIR/.last-run"
-[ -f "$MARKER" ] || touch -d '@0' "$MARKER" 2>/dev/null || : > "$MARKER"
+FIRST_RUN=0
+if [ ! -f "$MARKER" ]; then
+    FIRST_RUN=1
+    # Best-effort epoch-0 marker so '-newer' works correctly on future
+    # runs regardless of whether this succeeds — either way FIRST_RUN
+    # makes sure *this* run doesn't depend on it.
+    touch -d '@0' "$MARKER" 2>/dev/null || : > "$MARKER"
+fi
 
 if [ -d "$INFO" ]; then
-    find "$INFO" -maxdepth 1 -type f -newer "$MARKER" \
-        \( -name '*.preinst' -o -name '*.postinst' -o -name '*.prerm' \
-           -o -name '*.postrm' -o -name '*.conffiles' -o -name '*.md5sums' \
-           -o -name '*.list' -o -name '*.triggers' -o -name '*.templates' \) \
-        -print0 2>/dev/null | xargs -0 -r sed -i "s|$OLD_PATH|$NEW_PATH|g" 2>/dev/null
+    if [ "$FIRST_RUN" = 1 ]; then
+        find "$INFO" -maxdepth 1 -type f \
+            \( -name '*.preinst' -o -name '*.postinst' -o -name '*.prerm' \
+               -o -name '*.postrm' -o -name '*.conffiles' -o -name '*.md5sums' \
+               -o -name '*.list' -o -name '*.triggers' -o -name '*.templates' \) \
+            -print0 2>/dev/null
+    else
+        find "$INFO" -maxdepth 1 -type f -newer "$MARKER" \
+            \( -name '*.preinst' -o -name '*.postinst' -o -name '*.prerm' \
+               -o -name '*.postrm' -o -name '*.conffiles' -o -name '*.md5sums' \
+               -o -name '*.list' -o -name '*.triggers' -o -name '*.templates' \) \
+            -print0 2>/dev/null
+    fi | xargs -0 -r sed -i "s|$OLD_PATH|$NEW_PATH|g" 2>/dev/null
 fi
 [ -f "$STATUS" ] && sed -i "s|$OLD_PATH|$NEW_PATH|g" "$STATUS" 2>/dev/null
 touch "$MARKER" 2>/dev/null

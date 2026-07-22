@@ -407,7 +407,6 @@ inject_runtime_hooks() {
         fi
 
         echo "  patching ELF binaries (com.termux → $NEW_PKG)..."
-        local pcount=0
         for scan_dir in "$ROOTFS_DIR/bin" "$ROOTFS_DIR/sbin" \
                         "$ROOTFS_DIR/lib" "$ROOTFS_DIR/libexec" \
                         "$ROOTFS_DIR/glibc/bin" "$ROOTFS_DIR/glibc/lib"; do
@@ -430,8 +429,8 @@ inject_runtime_hooks() {
                     # Binary: only safe to touch in place if the new
                     # package name is the same byte length, and only
                     # with perl (sed is NUL-unsafe on binary data).
-                    if [ "$HEXPATCH_SAFE" = 1 ] && [ -x "$ROOTFS_DIR/bin/perl" ]; then
-                        "$ROOTFS_DIR/bin/perl" -e '
+                    if [ "$HEXPATCH_SAFE" = 1 ] && command -v perl >/dev/null 2>&1; then
+                        perl -e '
                             my $path = $ARGV[0];
                             open my $fh, "+<:raw", $path or exit 1;
                             my $data = do { local $/; <$fh> };
@@ -443,7 +442,7 @@ inject_runtime_hooks() {
                             }
                             close $fh;
                             exit 0;
-                        ' "$f" 2>/dev/null && pcount=$((pcount + 1))
+                        ' "$f" 2>/dev/null 
                     elif [ "$HEXPATCH_SAFE" = 0 ]; then
                         : # length mismatch — intentionally skipped, already warned once above
                     else
@@ -454,7 +453,7 @@ inject_runtime_hooks() {
                     # length, since this is normal line-based text
                     # substitution, not a fixed-offset binary patch.
                     LC_ALL=C sed -i 's|/data/data/com\.termux/|/data/data/'"$NEW_PKG"'/|g' "$f" 2>/dev/null \
-                        && pcount=$((pcount + 1))
+                        
                 fi
             done
         done
@@ -470,8 +469,8 @@ inject_runtime_hooks() {
         if [ -d "$INFO" ]; then
             echo "  patching dpkg metadata..."
             local PATCH_CMD
-            if [ -x "$ROOTFS_DIR/bin/perl" ]; then
-                PATCH_CMD="$ROOTFS_DIR/bin/perl -i -pe"
+            if command -v perl >/dev/null 2>&1; then
+                PATCH_CMD="perl -i -pe"
             else
                 PATCH_CMD="sed -i"
             fi
@@ -518,7 +517,20 @@ inject_runtime_hooks() {
         rm -f "$archive"
         case "$archive" in
             *.tar.xz)
-                (cd "$ROOTFS_DIR" && XZ_OPT=-e9 tar cJf "$OLDPWD/$archive" .)
+                # NOTE: `tar cJf out .` (source arg literally ".") makes GNU
+                # tar prefix every entry with "./" and adds a leading "./"
+                # directory entry for the root itself. That's harmless for
+                # extraction (both `tar xf` and the Kotlin-side
+                # trimStart('.', '/') handle it fine), but it doesn't match
+                # upstream Termux's bootstrap-aarch64.tar.xz, which has
+                # entries rooted directly (e.g. "bin/bash", not
+                # "./bin/bash"). Globbing the top-level names instead of
+                # passing "." keeps the two byte-for-byte comparable and
+                # avoids depending on the "./"-stripping workaround at all.
+                (
+                    cd "$ROOTFS_DIR" && shopt -s dotglob nullglob && \
+                    XZ_OPT=-e9 tar cJf "$OLDPWD/$archive" -- *
+                )
                 ;;
             *.zip)
                 (cd "$ROOTFS_DIR" && zip -qry "$OLDPWD/$archive" .)

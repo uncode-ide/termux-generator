@@ -34,15 +34,31 @@ process_one() {
         esac
     fi
 
-    # Cheap precheck: stream the payload tar through grep without
-    # writing anything to disk. Most packages (docs, fonts, pure-data
-    # arch:all packages, anything with no embedded paths) never touch
-    # the old prefix at all and can skip the expensive
-    # extract+rewrite+repack cycle entirely.
-    if ! "$PREFIX/bin/dpkg-deb" --fsys-tarfile "$deb" 2>/dev/null \
-            | tar -xO 2>/dev/null | grep -qa -- "$OLD_PATH"; then
-        return 0
+    # Cheap precheck, in two stages so most packages short-circuit
+    # after the cheaper one:
+    #   1. path/name listing — catches a package that physically places
+    #      files under data/data/com.termux/... even if nothing in
+    #      their own content references that path textually. This is
+    #      the critical case: missing it means the directory-rename
+    #      step below gets skipped, and dpkg later gets a real Android
+    #      Permission Denied trying to write into another app's sandbox.
+    #   2. payload content — catches shebangs/configs/embedded strings
+    #      that reference the old path without living under that
+    #      directory structure themselves (e.g. a script at a normal
+    #      location that hardcodes the old absolute path in its body).
+    # Both are real, non-overlapping cases, so both are checked; only
+    # packages where neither matches skip the expensive extract+repack.
+    needs_patch=0
+    if "$PREFIX/bin/dpkg-deb" -c "$deb" 2>/dev/null | grep -q "data/data/${OLD_PKG}"; then
+        needs_patch=1
     fi
+    if [ "$needs_patch" = 0 ]; then
+        if "$PREFIX/bin/dpkg-deb" --fsys-tarfile "$deb" 2>/dev/null \
+                | tar -xO 2>/dev/null | grep -qa -- "$OLD_PATH"; then
+            needs_patch=1
+        fi
+    fi
+    [ "$needs_patch" = 1 ] || return 0
 
     tmp=$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/fscompat.XXXXXX") || return 0
     if ! "$PREFIX/bin/dpkg-deb" -R "$deb" "$tmp" 2>/dev/null; then
